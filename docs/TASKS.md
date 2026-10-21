@@ -104,3 +104,12 @@
 - [x] Perform a final manual review against `PRD.md`.
 
 **Exit criteria:** Another developer can set up the project from a clean checkout using the docs. (Completed)
+
+## Phase 9 — Final Integration & Security Audit
+- [x] Verified migrations vs `ARCHITECTURE.md`: Fixed `SET search_path = ''` in `20261021000002_functions.sql`.
+- [x] Audited `evaluations` grants: Accommodated the live database where raw evaluations `SELECT` and `UPDATE` are not granted to clients.
+- [x] Built fully functional administrative workflows in `AdminPortal.tsx` for Curriculum, Questions (Theory, Numericals, MCQs), and Faculty Profiles/Assignments.
+- [x] Added automated audit suite `scripts/test-audit.js` and `npm test` verifying 46 assertions across academic rules, migration structure, and secret scanning.
+- [x] Ran production build `npm run build` with 0 compiler errors.
+
+**Exit criteria:** All audit points verified and documented. (Completed)

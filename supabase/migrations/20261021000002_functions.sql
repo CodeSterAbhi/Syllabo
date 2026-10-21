@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION public.is_app_admin()
 RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 STABLE
 AS $$
     SELECT EXISTS (
@@ -23,6 +23,7 @@ GRANT EXECUTE ON FUNCTION public.is_app_admin() TO authenticated;
 
 -- 2. Aggregate question rating function
 -- Returns average score and evaluation count for a published theory question.
+-- Uses an empty search_path as specified in docs/ARCHITECTURE.md section 3.
 -- Does NOT expose individual faculty identities, codes, emails, or individual score rows.
 CREATE OR REPLACE FUNCTION public.get_question_rating(p_question_id UUID)
 RETURNS TABLE (
@@ -31,12 +32,12 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 STABLE
 AS $$
     SELECT 
-        ROUND(COALESCE(AVG(e.score), 0)::numeric, 1) AS average_score,
-        COUNT(e.id)::bigint AS evaluation_count
+        pg_catalog.round(pg_catalog.coalesce(pg_catalog.avg(e.score), 0)::numeric, 1) AS average_score,
+        pg_catalog.count(e.id)::bigint AS evaluation_count
     FROM public.theory_questions tq
     JOIN public.units u ON u.id = tq.unit_id
     JOIN public.subjects s ON s.id = u.subject_id

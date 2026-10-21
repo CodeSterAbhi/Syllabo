@@ -441,15 +441,28 @@ export const MOCK_MCQS: MCQ[] = [
   }
 ];
 
-export const MOCK_FACULTY: FacultyProfile = {
-  id: 'f0000000-0000-0000-0000-000000000001',
-  user_id: 'u00000000-auth-user-0000-000000000001',
-  faculty_code: 'FAC-QTU-001',
-  display_name: 'Dr. R. K. Sharma (Dept of CSE)',
-  is_active: true,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-};
+export const MOCK_FACULTY_LIST: FacultyProfile[] = [
+  {
+    id: 'f0000000-0000-0000-0000-000000000001',
+    user_id: 'u00000000-auth-user-0000-000000000001',
+    faculty_code: 'FAC-QTU-001',
+    display_name: 'Dr. R. K. Sharma (Dept of CSE)',
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'f0000000-0000-0000-0000-000000000002',
+    user_id: 'u00000000-auth-user-0000-000000000002',
+    faculty_code: 'FAC-QTU-002',
+    display_name: 'Prof. Anjali Verma (Dept of CSE)',
+    is_active: true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+];
+
+export const MOCK_FACULTY: FacultyProfile = MOCK_FACULTY_LIST[0];
 
 export const MOCK_ASSIGNMENTS: FacultySubjectAssignment[] = [
   {

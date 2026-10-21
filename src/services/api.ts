@@ -19,12 +19,15 @@ import {
   MOCK_NUMERICALS,
   MOCK_MCQS,
   MOCK_FACULTY,
+  MOCK_FACULTY_LIST,
   MOCK_ASSIGNMENTS,
   MOCK_EVALUATIONS
 } from '../lib/mockData';
 
-// Local preview cache for testing faculty evaluations without live DB connection
+// Local preview cache for testing faculty evaluations and admin workflows without live DB connection
 let localEvaluations = { ...MOCK_EVALUATIONS };
+let localFacultyList = [...MOCK_FACULTY_LIST];
+let localAssignments = [...MOCK_ASSIGNMENTS];
 
 export const api = {
   // -------------------------------------------------------------
@@ -214,9 +217,20 @@ export const api = {
     }
 
     try {
-      const { data, error } = await supabase.rpc('get_question_rating', {
+      // First try standard parameter name p_question_id
+      let { data, error } = await supabase.rpc('get_question_rating', {
         p_question_id: questionId
       });
+
+      // If function parameter is named question_id in the live DB, retry with question_id
+      if (error && (error.message.includes('named parameter') || error.code === 'PGRST202')) {
+        const retry = await supabase.rpc('get_question_rating', {
+          question_id: questionId
+        });
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error || !data || data.length === 0) {
         return { average_score: 0, evaluation_count: 0 };
       }
@@ -224,8 +238,7 @@ export const api = {
         average_score: Number(data[0].average_score) || 0,
         evaluation_count: Number(data[0].evaluation_count) || 0
       };
-    } catch (err) {
-      console.error('Error calling get_question_rating RPC:', err);
+    } catch {
       return { average_score: 0, evaluation_count: 0 };
     }
   },
@@ -255,10 +268,12 @@ export const api = {
 
   async getFacultyAssignments(facultyId: string): Promise<FacultySubjectAssignment[]> {
     if (!isSupabaseConfigured) {
-      return MOCK_ASSIGNMENTS.map(a => ({
-        ...a,
-        subject: MOCK_SUBJECTS.find(s => s.id === a.subject_id)
-      }));
+      return localAssignments
+        .filter(a => a.faculty_id === facultyId)
+        .map(a => ({
+          ...a,
+          subject: MOCK_SUBJECTS.find(s => s.id === a.subject_id)
+        }));
     }
 
     const { data, error } = await supabase
@@ -278,21 +293,26 @@ export const api = {
       return localEvaluations;
     }
 
-    const { data, error } = await supabase
-      .from('evaluations')
-      .select('*')
-      .eq('faculty_id', facultyId);
+    try {
+      const { data, error } = await supabase
+        .from('evaluations')
+        .select('*')
+        .eq('faculty_id', facultyId);
 
-    if (error || !data) {
-      console.error('Error fetching faculty evaluations:', error);
+      // In the live database where raw evaluation rows are restricted from direct reading,
+      // catch error 42501 quietly without breaking the workbench
+      if (error || !data) {
+        return {};
+      }
+
+      const map: Record<string, Evaluation> = {};
+      for (const ev of data) {
+        map[ev.question_id] = ev;
+      }
+      return map;
+    } catch {
       return {};
     }
-
-    const map: Record<string, Evaluation> = {};
-    for (const ev of data) {
-      map[ev.question_id] = ev;
-    }
-    return map;
   },
 
   async submitEvaluation(
@@ -319,39 +339,46 @@ export const api = {
       return { success: true };
     }
 
-    // Check if an existing evaluation exists to follow the update-on-resubmit rule
-    const { data: existing } = await supabase
+    // Under least-privilege database grants, try INSERT first
+    const { error: insertError } = await supabase
       .from('evaluations')
-      .select('id')
-      .eq('question_id', questionId)
-      .eq('faculty_id', facultyId)
-      .maybeSingle();
+      .insert({
+        question_id: questionId,
+        faculty_id: facultyId,
+        score,
+        feedback,
+      });
 
-    if (existing) {
-      const { error } = await supabase
+    if (!insertError) {
+      return { success: true };
+    }
+
+    // If duplicate violation occurs (code 23505), try UPDATE if granted
+    if (insertError.code === '23505') {
+      const { error: updateError } = await supabase
         .from('evaluations')
         .update({
           score,
           feedback,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', existing.id);
+        .match({ question_id: questionId, faculty_id: facultyId });
 
-      if (error) return { success: false, error: error.message };
-      return { success: true };
-    } else {
-      const { error } = await supabase
-        .from('evaluations')
-        .insert({
-          question_id: questionId,
-          faculty_id: facultyId,
-          score,
-          feedback,
-        });
+      if (!updateError) {
+        return { success: true };
+      }
 
-      if (error) return { success: false, error: error.message };
-      return { success: true };
+      // If UPDATE is not granted (42501)
+      if (updateError.code === '42501') {
+        return {
+          success: false,
+          error: 'An evaluation for this question has already been submitted by your account. Under university database permissions, ratings cannot be overwritten.'
+        };
+      }
+      return { success: false, error: updateError.message };
     }
+
+    return { success: false, error: insertError.message };
   },
 
   // -------------------------------------------------------------
@@ -369,6 +396,14 @@ export const api = {
     } catch {
       return false;
     }
+  },
+
+  async getAllCoursesAdmin(): Promise<Course[]> {
+    if (!isSupabaseConfigured) {
+      return MOCK_COURSES;
+    }
+    const { data } = await supabase.from('courses').select('*').order('code');
+    return data || [];
   },
 
   async saveCourse(course: Partial<Course>): Promise<{ success: boolean; data?: Course; error?: string }> {
@@ -409,6 +444,27 @@ export const api = {
       if (error) return { success: false, error: error.message };
       return { success: true, data };
     }
+  },
+
+  async deleteCourse(courseId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const idx = MOCK_COURSES.findIndex(c => c.id === courseId);
+      if (idx >= 0) MOCK_COURSES.splice(idx, 1);
+      return { success: true };
+    }
+    const { error } = await supabase.from('courses').delete().eq('id', courseId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  async getAllSubjectsAdmin(courseId?: string): Promise<Subject[]> {
+    if (!isSupabaseConfigured) {
+      return courseId ? MOCK_SUBJECTS.filter(s => s.course_id === courseId) : MOCK_SUBJECTS;
+    }
+    let query = supabase.from('subjects').select('*').order('code');
+    if (courseId) query = query.eq('course_id', courseId);
+    const { data } = await query;
+    return data || [];
   },
 
   async saveSubject(subject: Partial<Subject>): Promise<{ success: boolean; data?: Subject; error?: string }> {
@@ -453,6 +509,29 @@ export const api = {
     }
   },
 
+  async deleteSubject(subjectId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const idx = MOCK_SUBJECTS.findIndex(s => s.id === subjectId);
+      if (idx >= 0) MOCK_SUBJECTS.splice(idx, 1);
+      return { success: true };
+    }
+    const { error } = await supabase.from('subjects').delete().eq('id', subjectId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  async getAllUnitsAdmin(subjectId: string): Promise<Unit[]> {
+    if (!isSupabaseConfigured) {
+      return MOCK_UNITS.filter(u => u.subject_id === subjectId).sort((a, b) => a.unit_number - b.unit_number);
+    }
+    const { data } = await supabase
+      .from('units')
+      .select('*')
+      .eq('subject_id', subjectId)
+      .order('unit_number');
+    return data || [];
+  },
+
   async saveUnit(unit: Partial<Unit>): Promise<{ success: boolean; data?: Unit; error?: string }> {
     if (!isSupabaseConfigured) {
       if (unit.id) {
@@ -495,6 +574,30 @@ export const api = {
     }
   },
 
+  async deleteUnit(unitId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const idx = MOCK_UNITS.findIndex(u => u.id === unitId);
+      if (idx >= 0) MOCK_UNITS.splice(idx, 1);
+      return { success: true };
+    }
+    const { error } = await supabase.from('units').delete().eq('id', unitId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  // Theory Questions CRUD
+  async getAllTheoryQuestionsAdmin(unitId: string): Promise<TheoryQuestion[]> {
+    if (!isSupabaseConfigured) {
+      return MOCK_THEORY_QUESTIONS.filter(q => q.unit_id === unitId).sort((a, b) => a.question_number - b.question_number);
+    }
+    const { data } = await supabase
+      .from('theory_questions')
+      .select('*')
+      .eq('unit_id', unitId)
+      .order('question_number');
+    return data || [];
+  },
+
   async saveTheoryQuestion(q: Partial<TheoryQuestion>): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured) {
       if (q.id) {
@@ -535,5 +638,284 @@ export const api = {
       if (error) return { success: false, error: error.message };
       return { success: true };
     }
+  },
+
+  async deleteTheoryQuestion(questionId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const idx = MOCK_THEORY_QUESTIONS.findIndex(q => q.id === questionId);
+      if (idx >= 0) MOCK_THEORY_QUESTIONS.splice(idx, 1);
+      return { success: true };
+    }
+    const { error } = await supabase.from('theory_questions').delete().eq('id', questionId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  // Numericals CRUD
+  async getAllNumericalsAdmin(unitId: string): Promise<Numerical[]> {
+    if (!isSupabaseConfigured) {
+      return MOCK_NUMERICALS.filter(n => n.unit_id === unitId).sort((a, b) => a.problem_number - b.problem_number);
+    }
+    const { data } = await supabase
+      .from('numericals')
+      .select('*')
+      .eq('unit_id', unitId)
+      .order('problem_number');
+    return data || [];
+  },
+
+  async saveNumerical(n: Partial<Numerical>): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      if (n.id) {
+        const idx = MOCK_NUMERICALS.findIndex(item => item.id === n.id);
+        if (idx >= 0) Object.assign(MOCK_NUMERICALS[idx], n);
+      } else {
+        MOCK_NUMERICALS.push({
+          id: `n-${Date.now()}`,
+          unit_id: n.unit_id!,
+          problem_number: n.problem_number || 1,
+          problem_statement: n.problem_statement || '',
+          given: n.given,
+          required: n.required,
+          formula: n.formula,
+          solution_steps: n.solution_steps || '',
+          final_answer: n.final_answer,
+          diagram_url: n.diagram_url,
+          hinglish_explanation: n.hinglish_explanation,
+          is_published: n.is_published ?? true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+      return { success: true };
+    }
+
+    if (n.id) {
+      const { error } = await supabase.from('numericals').update(n).eq('id', n.id);
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } else {
+      const { error } = await supabase.from('numericals').insert(n);
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    }
+  },
+
+  async deleteNumerical(numId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const idx = MOCK_NUMERICALS.findIndex(n => n.id === numId);
+      if (idx >= 0) MOCK_NUMERICALS.splice(idx, 1);
+      return { success: true };
+    }
+    const { error } = await supabase.from('numericals').delete().eq('id', numId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  // MCQs CRUD
+  async getAllMCQsAdmin(unitId: string): Promise<MCQ[]> {
+    if (!isSupabaseConfigured) {
+      return MOCK_MCQS.filter(m => m.unit_id === unitId).sort((a, b) => a.question_number - b.question_number);
+    }
+    const { data } = await supabase
+      .from('mcqs')
+      .select('*')
+      .eq('unit_id', unitId)
+      .order('question_number');
+    return data || [];
+  },
+
+  async saveMCQ(m: Partial<MCQ>): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      if (m.id) {
+        const idx = MOCK_MCQS.findIndex(item => item.id === m.id);
+        if (idx >= 0) Object.assign(MOCK_MCQS[idx], m);
+      } else {
+        MOCK_MCQS.push({
+          id: `m-${Date.now()}`,
+          unit_id: m.unit_id!,
+          question_number: m.question_number || 1,
+          question_text: m.question_text || '',
+          options: m.options || { A: '', B: '', C: '', D: '' },
+          correct_option: m.correct_option || 'A',
+          explanation: m.explanation,
+          is_published: m.is_published ?? true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+      return { success: true };
+    }
+
+    if (m.id) {
+      const { error } = await supabase.from('mcqs').update(m).eq('id', m.id);
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } else {
+      const { error } = await supabase.from('mcqs').insert(m);
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    }
+  },
+
+  async deleteMCQ(mcqId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const idx = MOCK_MCQS.findIndex(m => m.id === mcqId);
+      if (idx >= 0) MOCK_MCQS.splice(idx, 1);
+      return { success: true };
+    }
+    const { error } = await supabase.from('mcqs').delete().eq('id', mcqId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  // Faculty Management APIs
+  async getAllFacultyProfiles(): Promise<FacultyProfile[]> {
+    if (!isSupabaseConfigured) {
+      return localFacultyList;
+    }
+    const { data, error } = await supabase
+      .from('faculty_profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching faculty profiles:', error);
+      return [];
+    }
+    return data || [];
+  },
+
+  async saveFacultyProfile(profile: {
+    id?: string;
+    user_id: string;
+    faculty_code: string;
+    display_name: string;
+    is_active: boolean;
+  }): Promise<{ success: boolean; data?: FacultyProfile; error?: string }> {
+    if (!isSupabaseConfigured) {
+      if (profile.id) {
+        const idx = localFacultyList.findIndex(f => f.id === profile.id);
+        if (idx >= 0) Object.assign(localFacultyList[idx], profile);
+      } else {
+        const newProf: FacultyProfile = {
+          id: `f-${Date.now()}`,
+          user_id: profile.user_id,
+          faculty_code: profile.faculty_code,
+          display_name: profile.display_name,
+          is_active: profile.is_active,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        localFacultyList.push(newProf);
+      }
+      return { success: true };
+    }
+
+    if (profile.id) {
+      const { data, error } = await supabase
+        .from('faculty_profiles')
+        .update({
+          faculty_code: profile.faculty_code,
+          display_name: profile.display_name,
+          is_active: profile.is_active,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', profile.id)
+        .select()
+        .single();
+      if (error) return { success: false, error: error.message };
+      return { success: true, data };
+    } else {
+      const { data, error } = await supabase
+        .from('faculty_profiles')
+        .insert({
+          user_id: profile.user_id,
+          faculty_code: profile.faculty_code,
+          display_name: profile.display_name,
+          is_active: profile.is_active,
+        })
+        .select()
+        .single();
+      if (error) return { success: false, error: error.message };
+      return { success: true, data };
+    }
+  },
+
+  async toggleFacultyStatus(facultyId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const target = localFacultyList.find(f => f.id === facultyId);
+      if (target) target.is_active = isActive;
+      return { success: true };
+    }
+
+    const { error } = await supabase
+      .from('faculty_profiles')
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('id', facultyId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  async getAllFacultyAssignments(): Promise<(FacultySubjectAssignment & { faculty?: FacultyProfile; subject?: Subject })[]> {
+    if (!isSupabaseConfigured) {
+      return localAssignments.map(a => ({
+        ...a,
+        faculty: localFacultyList.find(f => f.id === a.faculty_id),
+        subject: MOCK_SUBJECTS.find(s => s.id === a.subject_id),
+      }));
+    }
+
+    const { data, error } = await supabase
+      .from('faculty_subject_assignments')
+      .select('*, faculty:faculty_profiles(*), subject:subjects(*)');
+
+    if (error) {
+      console.error('Error fetching all faculty assignments:', error);
+      return [];
+    }
+    return data || [];
+  },
+
+  async assignSubjectToFaculty(facultyId: string, subjectId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const exists = localAssignments.some(a => a.faculty_id === facultyId && a.subject_id === subjectId);
+      if (exists) return { success: false, error: 'Subject is already assigned to this faculty member.' };
+
+      localAssignments.push({
+        id: `a-${Date.now()}`,
+        faculty_id: facultyId,
+        subject_id: subjectId,
+        created_at: new Date().toISOString(),
+      });
+      return { success: true };
+    }
+
+    const { error } = await supabase
+      .from('faculty_subject_assignments')
+      .insert({
+        faculty_id: facultyId,
+        subject_id: subjectId,
+      });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  },
+
+  async removeFacultyAssignment(assignmentId: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSupabaseConfigured) {
+      const idx = localAssignments.findIndex(a => a.id === assignmentId);
+      if (idx >= 0) localAssignments.splice(idx, 1);
+      return { success: true };
+    }
+
+    const { error } = await supabase
+      .from('faculty_subject_assignments')
+      .delete()
+      .eq('id', assignmentId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
   }
 };
