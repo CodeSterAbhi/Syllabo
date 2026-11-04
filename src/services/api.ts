@@ -24,6 +24,78 @@ import {
   MOCK_EVALUATIONS
 } from '../lib/mockData';
 
+// Normalizers reconciling live Supabase PostgreSQL schema with application types
+export function normalizeTheoryQuestion(row: any): TheoryQuestion {
+  const topics: string[] = Array.isArray(row.topics_covered)
+    ? row.topics_covered
+    : typeof row.topics_covered === 'string'
+    ? row.topics_covered.split(',').map((s: string) => s.trim()).filter(Boolean)
+    : [];
+
+  const qText = row.question ?? row.question_text ?? '';
+
+  return {
+    id: row.id,
+    unit_id: row.unit_id,
+    question_number: row.question_number,
+    topics_covered: topics,
+    question: qText,
+    question_text: qText,
+    answer_intro: row.answer_intro ?? undefined,
+    answer_body: row.answer_body ?? '',
+    answer_conclusion: row.answer_conclusion ?? undefined,
+    diagram_url: row.diagram_url ?? undefined,
+    diagram_caption: row.diagram_caption ?? undefined,
+    hinglish_explanation: row.hinglish_explanation ?? undefined,
+    is_published: row.is_published ?? true,
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? undefined,
+  };
+}
+
+export function normalizeNumerical(row: any): Numerical {
+  const problemText = row.problem ?? row.problem_statement ?? '';
+  const givenText = row.given_data ?? row.given ?? undefined;
+  const requiredText = row.required_result ?? row.required ?? undefined;
+
+  return {
+    id: row.id,
+    unit_id: row.unit_id,
+    problem_number: row.problem_number,
+    problem: problemText,
+    problem_statement: problemText,
+    given_data: givenText,
+    given: givenText,
+    required_result: requiredText,
+    required: requiredText,
+    formula: row.formula ?? undefined,
+    solution_steps: row.solution_steps ?? '',
+    final_answer: row.final_answer ?? undefined,
+    diagram_url: row.diagram_url ?? undefined,
+    hinglish_explanation: row.hinglish_explanation ?? undefined,
+    is_published: row.is_published ?? true,
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? undefined,
+  };
+}
+
+export function normalizeMCQ(row: any): MCQ {
+  const qText = row.question ?? row.question_text ?? '';
+  return {
+    id: row.id,
+    unit_id: row.unit_id,
+    question_number: row.question_number,
+    question: qText,
+    question_text: qText,
+    options: row.options,
+    correct_option: String(row.correct_option),
+    explanation: row.explanation ?? undefined,
+    is_published: row.is_published ?? true,
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? undefined,
+  };
+}
+
 // Local preview cache for testing faculty evaluations and admin workflows without live DB connection
 let localEvaluations = { ...MOCK_EVALUATIONS };
 let localFacultyList = [...MOCK_FACULTY_LIST];
@@ -160,9 +232,12 @@ export const api = {
       return [];
     }
 
+    // Normalize each question from live schema
+    const normalized = questions.map(normalizeTheoryQuestion);
+
     // Fetch aggregate rating for each question using database function get_question_rating
     const withRatings = await Promise.all(
-      questions.map(async q => {
+      normalized.map(async q => {
         const rating = await this.getQuestionRating(q.id);
         return { ...q, rating };
       })
@@ -186,7 +261,7 @@ export const api = {
       console.error('Error fetching numericals:', error);
       return [];
     }
-    return data || [];
+    return (data || []).map(normalizeNumerical);
   },
 
   async getMCQs(unitId: string): Promise<MCQ[]> {
@@ -204,7 +279,7 @@ export const api = {
       console.error('Error fetching mcqs:', error);
       return [];
     }
-    return data || [];
+    return (data || []).map(normalizeMCQ);
   },
 
   async getQuestionRating(questionId: string): Promise<QuestionRating> {
@@ -258,18 +333,19 @@ export const api = {
       .from('faculty_profiles')
       .select('*')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+      console.error('Error fetching faculty profile:', error);
       return null;
     }
     return data;
   },
 
-  async getFacultyAssignments(facultyId: string): Promise<FacultySubjectAssignment[]> {
+  async getFacultyAssignments(facultyUserId: string): Promise<FacultySubjectAssignment[]> {
     if (!isSupabaseConfigured) {
       return localAssignments
-        .filter(a => a.faculty_id === facultyId)
+        .filter(a => a.faculty_id === facultyUserId)
         .map(a => ({
           ...a,
           subject: MOCK_SUBJECTS.find(s => s.id === a.subject_id)
@@ -279,7 +355,7 @@ export const api = {
     const { data, error } = await supabase
       .from('faculty_subject_assignments')
       .select('*, subject:subjects(*)')
-      .eq('faculty_id', facultyId);
+      .eq('faculty_id', facultyUserId);
 
     if (error) {
       console.error('Error fetching faculty assignments:', error);
@@ -288,7 +364,7 @@ export const api = {
     return data || [];
   },
 
-  async getFacultyEvaluations(facultyId: string): Promise<Record<string, Evaluation>> {
+  async getFacultyEvaluations(facultyUserId: string): Promise<Record<string, Evaluation>> {
     if (!isSupabaseConfigured) {
       return localEvaluations;
     }
@@ -297,7 +373,7 @@ export const api = {
       const { data, error } = await supabase
         .from('evaluations')
         .select('*')
-        .eq('faculty_id', facultyId);
+        .eq('faculty_id', facultyUserId);
 
       // In the live database where raw evaluation rows are restricted from direct reading,
       // catch error 42501 quietly without breaking the workbench
@@ -317,9 +393,9 @@ export const api = {
 
   async submitEvaluation(
     questionId: string,
-    facultyId: string,
+    facultyUserId: string,
     score: number,
-    feedback?: string
+    _feedback?: string
   ): Promise<{ success: boolean; error?: string }> {
     // Validate score bounds strictly 0 to 8
     if (score < 0 || score > 8) {
@@ -330,23 +406,22 @@ export const api = {
       localEvaluations[questionId] = {
         id: `ev-${Date.now()}`,
         question_id: questionId,
-        faculty_id: facultyId,
+        faculty_id: facultyUserId,
         score,
-        feedback,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       };
       return { success: true };
     }
 
-    // Under least-privilege database grants, try INSERT first
+    // Under least-privilege database grants, insert into evaluations
+    // Live schema: evaluations table has (question_id, faculty_id, score, created_at)
+    // No feedback or updated_at columns exist in the live schema.
     const { error: insertError } = await supabase
       .from('evaluations')
       .insert({
         question_id: questionId,
-        faculty_id: facultyId,
+        faculty_id: facultyUserId,
         score,
-        feedback,
       });
 
     if (!insertError) {
@@ -357,12 +432,8 @@ export const api = {
     if (insertError.code === '23505') {
       const { error: updateError } = await supabase
         .from('evaluations')
-        .update({
-          score,
-          feedback,
-          updated_at: new Date().toISOString(),
-        })
-        .match({ question_id: questionId, faculty_id: facultyId });
+        .update({ score })
+        .match({ question_id: questionId, faculty_id: facultyUserId });
 
       if (!updateError) {
         return { success: true };
@@ -390,9 +461,22 @@ export const api = {
       return true; // Admin panel unlocked in local dev preview mode
     }
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return false;
+
+      // Check via RPC is_app_admin or direct query on app_admins
       const { data, error } = await supabase.rpc('is_app_admin');
-      if (error) return false;
-      return Boolean(data);
+      if (!error && data !== null) {
+        return Boolean(data);
+      }
+      // Fallback query to app_admins table (user_id is primary key)
+      const { data: adminRow } = await supabase
+        .from('app_admins')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      return Boolean(adminRow);
     } catch {
       return false;
     }
@@ -419,17 +503,24 @@ export const api = {
           description: course.description,
           is_published: course.is_published ?? true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
         };
         MOCK_COURSES.push(newCourse);
       }
       return { success: true };
     }
 
+    // Live schema: courses has (id, code, name, is_published, created_at).
+    // description and updated_at are not present in the live schema.
+    const payload: Record<string, any> = {
+      code: course.code,
+      name: course.name,
+      is_published: course.is_published ?? true,
+    };
+
     if (course.id) {
       const { data, error } = await supabase
         .from('courses')
-        .update(course)
+        .update(payload)
         .eq('id', course.id)
         .select()
         .single();
@@ -438,7 +529,7 @@ export const api = {
     } else {
       const { data, error } = await supabase
         .from('courses')
-        .insert(course)
+        .insert(payload)
         .select()
         .single();
       if (error) return { success: false, error: error.message };
@@ -482,17 +573,26 @@ export const api = {
           description: subject.description,
           is_published: subject.is_published ?? true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
         };
         MOCK_SUBJECTS.push(newSubject);
       }
       return { success: true };
     }
 
+    // Live schema: subjects has (id, course_id, semester, code, name, is_published, created_at).
+    // description and updated_at are not present in the live schema.
+    const payload: Record<string, any> = {
+      course_id: subject.course_id,
+      semester: subject.semester,
+      code: subject.code,
+      name: subject.name,
+      is_published: subject.is_published ?? true,
+    };
+
     if (subject.id) {
       const { data, error } = await supabase
         .from('subjects')
-        .update(subject)
+        .update(payload)
         .eq('id', subject.id)
         .select()
         .single();
@@ -501,7 +601,7 @@ export const api = {
     } else {
       const { data, error } = await supabase
         .from('subjects')
-        .insert(subject)
+        .insert(payload)
         .select()
         .single();
       if (error) return { success: false, error: error.message };
@@ -547,17 +647,26 @@ export const api = {
           numericals_applicable: unit.numericals_applicable ?? true,
           is_published: unit.is_published ?? true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
         };
         MOCK_UNITS.push(newUnit);
       }
       return { success: true };
     }
 
+    // Live schema: units has (id, subject_id, unit_number, title, numericals_applicable, is_published, created_at).
+    // description and updated_at are not present in the live schema.
+    const payload: Record<string, any> = {
+      subject_id: unit.subject_id,
+      unit_number: unit.unit_number,
+      title: unit.title,
+      numericals_applicable: unit.numericals_applicable ?? true,
+      is_published: unit.is_published ?? true,
+    };
+
     if (unit.id) {
       const { data, error } = await supabase
         .from('units')
-        .update(unit)
+        .update(payload)
         .eq('id', unit.id)
         .select()
         .single();
@@ -566,7 +675,7 @@ export const api = {
     } else {
       const { data, error } = await supabase
         .from('units')
-        .insert(unit)
+        .insert(payload)
         .select()
         .single();
       if (error) return { success: false, error: error.message };
@@ -595,21 +704,36 @@ export const api = {
       .select('*')
       .eq('unit_id', unitId)
       .order('question_number');
-    return data || [];
+    return (data || []).map(normalizeTheoryQuestion);
   },
 
   async saveTheoryQuestion(q: Partial<TheoryQuestion>): Promise<{ success: boolean; error?: string }> {
+    const topicsArray: string[] = Array.isArray(q.topics_covered)
+      ? q.topics_covered
+      : typeof q.topics_covered === 'string'
+      ? (q.topics_covered as string).split(',').map((s: string) => s.trim()).filter(Boolean)
+      : [];
+    const questionText = q.question || q.question_text || '';
+
     if (!isSupabaseConfigured) {
       if (q.id) {
         const idx = MOCK_THEORY_QUESTIONS.findIndex(item => item.id === q.id);
-        if (idx >= 0) Object.assign(MOCK_THEORY_QUESTIONS[idx], q);
+        if (idx >= 0) {
+          Object.assign(MOCK_THEORY_QUESTIONS[idx], {
+            ...q,
+            topics_covered: topicsArray,
+            question: questionText,
+            question_text: questionText,
+          });
+        }
       } else {
         MOCK_THEORY_QUESTIONS.push({
           id: `q-${Date.now()}`,
           unit_id: q.unit_id!,
           question_number: q.question_number || 1,
-          topics_covered: q.topics_covered || '',
-          question_text: q.question_text || '',
+          topics_covered: topicsArray,
+          question: questionText,
+          question_text: questionText,
           answer_intro: q.answer_intro,
           answer_body: q.answer_body || '',
           answer_conclusion: q.answer_conclusion,
@@ -618,23 +742,37 @@ export const api = {
           hinglish_explanation: q.hinglish_explanation,
           is_published: q.is_published ?? true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
         });
       }
       return { success: true };
     }
 
+    // Live schema: theory_questions uses 'question' (not question_text) and 'topics_covered' as text[].
+    // diagram_caption and updated_at are not present in live DB schema.
+    const payload: Record<string, any> = {
+      unit_id: q.unit_id,
+      question_number: q.question_number,
+      topics_covered: topicsArray,
+      question: questionText,
+      answer_intro: q.answer_intro || null,
+      answer_body: q.answer_body || '',
+      answer_conclusion: q.answer_conclusion || null,
+      diagram_url: q.diagram_url || null,
+      hinglish_explanation: q.hinglish_explanation || null,
+      is_published: q.is_published ?? true,
+    };
+
     if (q.id) {
       const { error } = await supabase
         .from('theory_questions')
-        .update(q)
+        .update(payload)
         .eq('id', q.id);
       if (error) return { success: false, error: error.message };
       return { success: true };
     } else {
       const { error } = await supabase
         .from('theory_questions')
-        .insert(q);
+        .insert(payload);
       if (error) return { success: false, error: error.message };
       return { success: true };
     }
@@ -661,22 +799,39 @@ export const api = {
       .select('*')
       .eq('unit_id', unitId)
       .order('problem_number');
-    return data || [];
+    return (data || []).map(normalizeNumerical);
   },
 
   async saveNumerical(n: Partial<Numerical>): Promise<{ success: boolean; error?: string }> {
+    const problemText = n.problem || n.problem_statement || '';
+    const givenText = n.given_data ?? n.given ?? null;
+    const requiredText = n.required_result ?? n.required ?? null;
+
     if (!isSupabaseConfigured) {
       if (n.id) {
         const idx = MOCK_NUMERICALS.findIndex(item => item.id === n.id);
-        if (idx >= 0) Object.assign(MOCK_NUMERICALS[idx], n);
+        if (idx >= 0) {
+          Object.assign(MOCK_NUMERICALS[idx], {
+            ...n,
+            problem: problemText,
+            problem_statement: problemText,
+            given_data: givenText ?? undefined,
+            given: givenText ?? undefined,
+            required_result: requiredText ?? undefined,
+            required: requiredText ?? undefined,
+          });
+        }
       } else {
         MOCK_NUMERICALS.push({
           id: `n-${Date.now()}`,
           unit_id: n.unit_id!,
           problem_number: n.problem_number || 1,
-          problem_statement: n.problem_statement || '',
-          given: n.given,
-          required: n.required,
+          problem: problemText,
+          problem_statement: problemText,
+          given_data: givenText ?? undefined,
+          given: givenText ?? undefined,
+          required_result: requiredText ?? undefined,
+          required: requiredText ?? undefined,
           formula: n.formula,
           solution_steps: n.solution_steps || '',
           final_answer: n.final_answer,
@@ -684,18 +839,33 @@ export const api = {
           hinglish_explanation: n.hinglish_explanation,
           is_published: n.is_published ?? true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
         });
       }
       return { success: true };
     }
 
+    // Live schema: numericals uses 'problem', 'given_data', 'required_result'.
+    // updated_at is not present in live DB schema.
+    const payload: Record<string, any> = {
+      unit_id: n.unit_id,
+      problem_number: n.problem_number,
+      problem: problemText,
+      given_data: givenText,
+      required_result: requiredText,
+      formula: n.formula || null,
+      solution_steps: n.solution_steps || '',
+      final_answer: n.final_answer || null,
+      diagram_url: n.diagram_url || null,
+      hinglish_explanation: n.hinglish_explanation || null,
+      is_published: n.is_published ?? true,
+    };
+
     if (n.id) {
-      const { error } = await supabase.from('numericals').update(n).eq('id', n.id);
+      const { error } = await supabase.from('numericals').update(payload).eq('id', n.id);
       if (error) return { success: false, error: error.message };
       return { success: true };
     } else {
-      const { error } = await supabase.from('numericals').insert(n);
+      const { error } = await supabase.from('numericals').insert(payload);
       if (error) return { success: false, error: error.message };
       return { success: true };
     }
@@ -722,37 +892,59 @@ export const api = {
       .select('*')
       .eq('unit_id', unitId)
       .order('question_number');
-    return data || [];
+    return (data || []).map(normalizeMCQ);
   },
 
   async saveMCQ(m: Partial<MCQ>): Promise<{ success: boolean; error?: string }> {
+    const questionText = m.question || m.question_text || '';
+    const correctOpt = String(m.correct_option || 'A');
+
     if (!isSupabaseConfigured) {
       if (m.id) {
         const idx = MOCK_MCQS.findIndex(item => item.id === m.id);
-        if (idx >= 0) Object.assign(MOCK_MCQS[idx], m);
+        if (idx >= 0) {
+          Object.assign(MOCK_MCQS[idx], {
+            ...m,
+            question: questionText,
+            question_text: questionText,
+            correct_option: correctOpt,
+          });
+        }
       } else {
         MOCK_MCQS.push({
           id: `m-${Date.now()}`,
           unit_id: m.unit_id!,
           question_number: m.question_number || 1,
-          question_text: m.question_text || '',
+          question: questionText,
+          question_text: questionText,
           options: m.options || { A: '', B: '', C: '', D: '' },
-          correct_option: m.correct_option || 'A',
+          correct_option: correctOpt,
           explanation: m.explanation,
           is_published: m.is_published ?? true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
         });
       }
       return { success: true };
     }
 
+    // Live schema: mcqs uses 'question' (not question_text) and correct_option as text.
+    // updated_at is not present in live DB schema.
+    const payload: Record<string, any> = {
+      unit_id: m.unit_id,
+      question_number: m.question_number,
+      question: questionText,
+      options: m.options,
+      correct_option: correctOpt,
+      explanation: m.explanation || null,
+      is_published: m.is_published ?? true,
+    };
+
     if (m.id) {
-      const { error } = await supabase.from('mcqs').update(m).eq('id', m.id);
+      const { error } = await supabase.from('mcqs').update(payload).eq('id', m.id);
       if (error) return { success: false, error: error.message };
       return { success: true };
     } else {
-      const { error } = await supabase.from('mcqs').insert(m);
+      const { error } = await supabase.from('mcqs').insert(payload);
       if (error) return { success: false, error: error.message };
       return { success: true };
     }
@@ -787,41 +979,44 @@ export const api = {
   },
 
   async saveFacultyProfile(profile: {
-    id?: string;
     user_id: string;
     faculty_code: string;
     display_name: string;
     is_active: boolean;
   }): Promise<{ success: boolean; data?: FacultyProfile; error?: string }> {
     if (!isSupabaseConfigured) {
-      if (profile.id) {
-        const idx = localFacultyList.findIndex(f => f.id === profile.id);
-        if (idx >= 0) Object.assign(localFacultyList[idx], profile);
+      const idx = localFacultyList.findIndex(f => f.user_id === profile.user_id);
+      if (idx >= 0) {
+        Object.assign(localFacultyList[idx], profile);
       } else {
         const newProf: FacultyProfile = {
-          id: `f-${Date.now()}`,
           user_id: profile.user_id,
           faculty_code: profile.faculty_code,
           display_name: profile.display_name,
           is_active: profile.is_active,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
         };
         localFacultyList.push(newProf);
       }
       return { success: true };
     }
 
-    if (profile.id) {
+    // Live schema: faculty_profiles primary key is user_id, no 'id' column, no 'updated_at'
+    const { data: existing } = await supabase
+      .from('faculty_profiles')
+      .select('user_id')
+      .eq('user_id', profile.user_id)
+      .maybeSingle();
+
+    if (existing) {
       const { data, error } = await supabase
         .from('faculty_profiles')
         .update({
           faculty_code: profile.faculty_code,
           display_name: profile.display_name,
           is_active: profile.is_active,
-          updated_at: new Date().toISOString(),
         })
-        .eq('id', profile.id)
+        .eq('user_id', profile.user_id)
         .select()
         .single();
       if (error) return { success: false, error: error.message };
@@ -842,17 +1037,18 @@ export const api = {
     }
   },
 
-  async toggleFacultyStatus(facultyId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> {
+  async toggleFacultyStatus(facultyUserId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured) {
-      const target = localFacultyList.find(f => f.id === facultyId);
+      const target = localFacultyList.find(f => f.user_id === facultyUserId);
       if (target) target.is_active = isActive;
       return { success: true };
     }
 
+    // Live schema: update by user_id, no updated_at column
     const { error } = await supabase
       .from('faculty_profiles')
-      .update({ is_active: isActive, updated_at: new Date().toISOString() })
-      .eq('id', facultyId);
+      .update({ is_active: isActive })
+      .eq('user_id', facultyUserId);
 
     if (error) return { success: false, error: error.message };
     return { success: true };
@@ -862,7 +1058,7 @@ export const api = {
     if (!isSupabaseConfigured) {
       return localAssignments.map(a => ({
         ...a,
-        faculty: localFacultyList.find(f => f.id === a.faculty_id),
+        faculty: localFacultyList.find(f => f.user_id === a.faculty_id),
         subject: MOCK_SUBJECTS.find(s => s.id === a.subject_id),
       }));
     }
@@ -878,24 +1074,25 @@ export const api = {
     return data || [];
   },
 
-  async assignSubjectToFaculty(facultyId: string, subjectId: string): Promise<{ success: boolean; error?: string }> {
+  async assignSubjectToFaculty(facultyUserId: string, subjectId: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured) {
-      const exists = localAssignments.some(a => a.faculty_id === facultyId && a.subject_id === subjectId);
+      const exists = localAssignments.some(a => a.faculty_id === facultyUserId && a.subject_id === subjectId);
       if (exists) return { success: false, error: 'Subject is already assigned to this faculty member.' };
 
       localAssignments.push({
         id: `a-${Date.now()}`,
-        faculty_id: facultyId,
+        faculty_id: facultyUserId,
         subject_id: subjectId,
         created_at: new Date().toISOString(),
       });
       return { success: true };
     }
 
+    // Live schema: faculty_id references faculty_profiles.user_id
     const { error } = await supabase
       .from('faculty_subject_assignments')
       .insert({
-        faculty_id: facultyId,
+        faculty_id: facultyUserId,
         subject_id: subjectId,
       });
 

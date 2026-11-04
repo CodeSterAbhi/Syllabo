@@ -2,7 +2,7 @@ import React from 'react';
 import { Home, BookOpen, GraduationCap, CheckCircle2, Award, Settings } from 'lucide-react';
 
 interface SidebarProps {
-  currentView: 'home' | 'subject' | 'unit' | 'faculty' | 'admin';
+  currentView: 'home' | 'subject' | 'unit' | 'faculty' | 'admin' | 'terms';
   onNavigateHome: () => void;
   onNavigateFaculty: () => void;
   onNavigateAdmin: () => void;

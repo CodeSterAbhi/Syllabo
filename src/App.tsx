@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
+import { Footer } from './components/layout/Footer';
 import { Breadcrumbs } from './components/common/Breadcrumbs';
 import { HomeView } from './components/student/HomeView';
 import { SubjectDetailView } from './components/student/SubjectDetailView';
 import { UnitHubView } from './components/student/UnitHubView';
 import { FacultyPortal } from './components/faculty/FacultyPortal';
 import { AdminPortal } from './components/admin/AdminPortal';
+import { TermsPage } from './components/legal/TermsPage';
 import { api } from './services/api';
 import {
   Course,
@@ -20,8 +22,17 @@ import {
 } from './types';
 
 export function App() {
-  // Navigation states
-  const [currentView, setCurrentView] = useState<'home' | 'subject' | 'unit' | 'faculty' | 'admin'>('home');
+  // Navigation states with direct URL support for /terms
+  const getInitialView = (): 'home' | 'subject' | 'unit' | 'faculty' | 'admin' | 'terms' => {
+    if (typeof window !== 'undefined') {
+      if (window.location.pathname === '/terms' || window.location.hash === '#terms') {
+        return 'terms';
+      }
+    }
+    return 'home';
+  };
+
+  const [currentView, setCurrentView] = useState<'home' | 'subject' | 'unit' | 'faculty' | 'admin' | 'terms'>(getInitialView);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<Unit | null>(null);
@@ -64,8 +75,26 @@ export function App() {
     initApp();
   }, []);
 
+  // Browser navigation popstate listener for /terms
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== 'undefined') {
+        if (window.location.pathname === '/terms' || window.location.hash === '#terms') {
+          setCurrentView('terms');
+        } else {
+          setCurrentView('home');
+        }
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   // Handle subject selection
   const handleSelectSubject = async (subject: Subject) => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+      window.history.pushState(null, '', '/');
+    }
     setSelectedSubject(subject);
     const course = courses.find(c => c.id === subject.course_id) || null;
     setSelectedCourse(course);
@@ -78,6 +107,9 @@ export function App() {
 
   // Handle unit selection (Enter Unit Hub)
   const handleSelectUnit = async (unit: Unit) => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+      window.history.pushState(null, '', '/');
+    }
     setSelectedUnit(unit);
     const [tList, nList, mList] = await Promise.all([
       api.getTheoryQuestions(unit.id),
@@ -92,12 +124,26 @@ export function App() {
   };
 
   const handleNavigateHome = () => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+      window.history.pushState(null, '', '/');
+    }
     setCurrentView('home');
     setSelectedUnit(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleNavigateTerms = () => {
+    if (typeof window !== 'undefined' && window.location.pathname !== '/terms') {
+      window.history.pushState(null, '', '/terms');
+    }
+    setCurrentView('terms');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleOpenFacultyEvaluation = (questionId: string) => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+      window.history.pushState(null, '', '/');
+    }
     setTargetEvaluationQuestionId(questionId);
     setCurrentView('faculty');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -139,6 +185,11 @@ export function App() {
       label: 'Admin Control Center',
     });
   }
+  if (currentView === 'terms') {
+    breadcrumbItems.push({
+      label: 'Terms & Conditions',
+    });
+  }
 
   const currentRole = currentView === 'admin' ? 'admin' : currentView === 'faculty' ? 'faculty' : 'student';
 
@@ -146,8 +197,18 @@ export function App() {
     <div className="min-h-screen bg-[#FBF9F5] text-slate-800 flex flex-col font-sans">
       {/* Top Navbar */}
       <Navbar
-        onFacultyClick={() => setCurrentView('faculty')}
-        onAdminClick={() => setCurrentView('admin')}
+        onFacultyClick={() => {
+          if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+            window.history.pushState(null, '', '/');
+          }
+          setCurrentView('faculty');
+        }}
+        onAdminClick={() => {
+          if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+            window.history.pushState(null, '', '/');
+          }
+          setCurrentView('admin');
+        }}
         onHomeClick={handleNavigateHome}
         facultyProfile={facultyProfile}
         isAdmin={isAdmin}
@@ -160,8 +221,18 @@ export function App() {
         <Sidebar
           currentView={currentView}
           onNavigateHome={handleNavigateHome}
-          onNavigateFaculty={() => setCurrentView('faculty')}
-          onNavigateAdmin={() => setCurrentView('admin')}
+          onNavigateFaculty={() => {
+            if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+              window.history.pushState(null, '', '/');
+            }
+            setCurrentView('faculty');
+          }}
+          onNavigateAdmin={() => {
+            if (typeof window !== 'undefined' && window.location.pathname === '/terms') {
+              window.history.pushState(null, '', '/');
+            }
+            setCurrentView('admin');
+          }}
           isAdmin={isAdmin}
         />
 
@@ -189,6 +260,8 @@ export function App() {
               onSelectSubject={handleSelectSubject}
               onSelectProgram={(course) => setSelectedCourse(course)}
             />
+          ) : currentView === 'terms' ? (
+            <TermsPage onBackToHome={handleNavigateHome} />
           ) : currentView === 'subject' && selectedSubject ? (
             <SubjectDetailView
               subject={selectedSubject}
@@ -219,21 +292,8 @@ export function App() {
         </main>
       </div>
 
-      {/* Footer */}
-      <footer className="mt-auto border-t border-stone-200/60 bg-white py-8 px-4 text-center text-xs text-slate-500">
-        <div className="max-w-4xl mx-auto space-y-2">
-          <p className="font-semibold text-slate-700">
-            Syllabo — Exam Preparation Platform for Quantum University
-          </p>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            Syllabo is an independent student academic project designed to facilitate structured university exam preparation.
-            Curriculum content and syllabi rights belong to Quantum University.
-          </p>
-          <p className="text-[10px] text-slate-400">
-            PostgreSQL RLS Protected • Supabase Auth Integrated • 0–8 Marks Faculty Verification
-          </p>
-        </div>
-      </footer>
+      {/* Global Footer */}
+      <Footer onTermsClick={handleNavigateTerms} />
     </div>
   );
 }

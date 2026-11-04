@@ -37,7 +37,7 @@ STABLE
 AS $$
     SELECT 
         pg_catalog.round(pg_catalog.coalesce(pg_catalog.avg(e.score), 0)::numeric, 1) AS average_score,
-        pg_catalog.count(e.id)::bigint AS evaluation_count
+        pg_catalog.count(e.question_id)::bigint AS evaluation_count
     FROM public.theory_questions tq
     JOIN public.units u ON u.id = tq.unit_id
     JOIN public.subjects s ON s.id = u.subject_id

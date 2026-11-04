@@ -1,69 +1,81 @@
 -- Syllabo: Development Sample Seed Data
 -- =========================================================================
--- NOTICE: THIS SCRIPT CONTAINS EXPLICITLY FICTITIOUS SAMPLE DATA FOR LOCAL
--- DEVELOPMENT, TESTING AND PREVIEW PURPOSES ONLY.
--- IT DOES NOT CONTAIN OFFICIAL QUANTUM UNIVERSITY CURRICULUM OR SYLLABUS CONTENT.
--- REAL CURRICULUM WILL BE ENTERED MANUALLY BY THE MAINTAINER.
+-- NOTICE & ENVIRONMENT GUARD:
+-- THIS SCRIPT CONTAINS EXPLICITLY FICTITIOUS SAMPLE DATA FOR LOCAL
+-- DEVELOPMENT, CI TESTING AND PREVIEW PURPOSES ONLY.
+-- IT MUST NEVER BE PUBLISHED OR EXECUTED AGAINST THE PRODUCTION DATABASE.
+-- ALL REAL CURRICULUM MUST BE AUTHORITATIVELY ENTERED BY UNIVERSITY MAINTAINERS.
+--
+-- Schema alignment: Conforms strictly to the live database column names:
+-- - courses, subjects, units: lacks 'description' in live schema
+-- - theory_questions: uses 'question' (not question_text) and 'topics_covered' text[]
+-- - numericals: uses 'problem', 'given_data', 'required_result'
+-- - mcqs: uses 'question' (not question_text)
 -- =========================================================================
 
+-- Safety check: Ensure script does not run if production flag or real data is detected
+DO $$
+BEGIN
+    -- Prevent accidental execution in environments with non-sample courses
+    IF EXISTS (SELECT 1 FROM public.courses WHERE code NOT IN ('BTECH-CSE', 'BCA', 'BTECH-ECE')) THEN
+        RAISE EXCEPTION 'Safety check failed: Non-sample curriculum detected. Aborting sample seed execution to prevent overwriting production data.';
+    END IF;
+END $$;
+
 -- Sample Course
-INSERT INTO public.courses (id, code, name, description, is_published)
+INSERT INTO public.courses (id, code, name, is_published)
 VALUES (
     'c0000000-0000-0000-0000-000000000001',
     'BTECH-CSE',
     'B.Tech Computer Science & Engineering',
-    'Four-year undergraduate engineering degree program',
     true
 )
 ON CONFLICT (code) DO NOTHING;
 
 -- Sample Subject
-INSERT INTO public.subjects (id, course_id, semester, code, name, description, is_published)
+INSERT INTO public.subjects (id, course_id, semester, code, name, is_published)
 VALUES (
     's0000000-0000-0000-0000-000000000001',
     'c0000000-0000-0000-0000-000000000001',
     3,
     'CS301',
     'Data Structures & Algorithms',
-    'Foundational study of data structures, algorithm analysis, and problem-solving techniques',
     true
 )
 ON CONFLICT (course_id, semester, code) DO NOTHING;
 
 -- Sample Unit 1 (With numericals applicable)
-INSERT INTO public.units (id, subject_id, unit_number, title, description, numericals_applicable, is_published)
+INSERT INTO public.units (id, subject_id, unit_number, title, numericals_applicable, is_published)
 VALUES (
     'u0000000-0000-0000-0000-000000000001',
     's0000000-0000-0000-0000-000000000001',
     1,
     'Unit 1: Linear Data Structures & Arrays',
-    'Overview of linear arrays, representation in memory, row/column major order, and asymptotic complexity.',
     true,
     true
 )
 ON CONFLICT (subject_id, unit_number) DO NOTHING;
 
 -- Sample Unit 2 (Numericals NOT applicable example)
-INSERT INTO public.units (id, subject_id, unit_number, title, description, numericals_applicable, is_published)
+INSERT INTO public.units (id, subject_id, unit_number, title, numericals_applicable, is_published)
 VALUES (
     'u0000000-0000-0000-0000-000000000002',
     's0000000-0000-0000-0000-000000000001',
     2,
     'Unit 2: Theoretical Foundations of Abstract Data Types',
-    'Conceptual principles and formal axiomatic definitions of abstract data types.',
     false,
     true
 )
 ON CONFLICT (subject_id, unit_number) DO NOTHING;
 
 -- 5 Sample Theory Questions for Unit 1
-INSERT INTO public.theory_questions (id, unit_id, question_number, topics_covered, question_text, answer_intro, answer_body, answer_conclusion, hinglish_explanation, is_published)
+INSERT INTO public.theory_questions (id, unit_id, question_number, topics_covered, question, answer_intro, answer_body, answer_conclusion, hinglish_explanation, is_published)
 VALUES
 (
     'q0000000-0000-0000-0000-000000000001',
     'u0000000-0000-0000-0000-000000000001',
     1,
-    'Data Structures Classification, Primitive vs Non-Primitive, Linear vs Non-Linear',
+    ARRAY['Data Structures Classification', 'Primitive vs Non-Primitive', 'Linear vs Non-Linear']::text[],
     '[SAMPLE DEMO] Define Data Structures and explain their classification with suitable examples.',
     'A data structure is a specialized format for organizing, processing, retrieving, and storing data in computer memory efficiently.',
     'Data structures are primarily classified into two broad categories:
@@ -80,7 +92,7 @@ Selection criteria depend on memory footprint, algorithmic complexity, and dynam
     'q0000000-0000-0000-0000-000000000002',
     'u0000000-0000-0000-0000-000000000002',
     2,
-    'Asymptotic Notations, Time Complexity, Space Complexity, Big-O, Omega, Theta',
+    ARRAY['Asymptotic Notations', 'Time Complexity', 'Space Complexity', 'Big-O', 'Omega', 'Theta']::text[],
     '[SAMPLE DEMO] What are asymptotic notations? Explain Big-O, Omega, and Theta notations.',
     'Asymptotic analysis evaluates mathematical performance bounds of algorithms as the input size n approaches infinity, independent of machine architecture.',
     'The three primary standard notations are:
@@ -96,7 +108,7 @@ These bounds allow objective comparison between sorting, searching, and traversa
     'q0000000-0000-0000-0000-000000000003',
     'u0000000-0000-0000-0000-000000000003',
     3,
-    '1D & 2D Arrays, Memory Allocation, Row-Major vs Column-Major Addressing',
+    ARRAY['1D & 2D Arrays', 'Memory Allocation', 'Row-Major vs Column-Major Addressing']::text[],
     '[SAMPLE DEMO] Explain how 2D arrays are stored in memory using Row-Major and Column-Major order.',
     'A 2D array is a matrix of elements of uniform data type mapped onto contiguous linear physical computer memory.',
     'Since physical RAM is linearly addressed, 2D arrays are linearized using two canonical mapping techniques:
@@ -115,7 +127,7 @@ C/C++ utilize Row-Major mapping, whereas Fortran utilizes Column-Major mapping.'
     'q0000000-0000-0000-0000-000000000004',
     'u0000000-0000-0000-0000-000000000004',
     4,
-    'Array Operations, Traversal, Insertion, Deletion, Search Complexity',
+    ARRAY['Array Operations', 'Traversal', 'Insertion', 'Deletion', 'Search Complexity']::text[],
     '[SAMPLE DEMO] Discuss basic operations on linear arrays and their respective time complexities.',
     'Linear arrays support a standardized suite of operations dictated by fixed-size contiguous memory allocation.',
     'Core array operations and algorithmic complexities:
@@ -132,7 +144,7 @@ C/C++ utilize Row-Major mapping, whereas Fortran utilizes Column-Major mapping.'
     'q0000000-0000-0000-0000-000000000005',
     'u0000000-0000-0000-0000-000000000005',
     5,
-    'Sparse Matrix, Coordinate List (COO), Compressed Sparse Row (CSR), Memory Optimization',
+    ARRAY['Sparse Matrix', 'Coordinate List (COO)', 'Compressed Sparse Row (CSR)', 'Memory Optimization']::text[],
     '[SAMPLE DEMO] What is a Sparse Matrix? Explain representation methods and memory advantages.',
     'A sparse matrix is a matrix in which the majority of elements have a value of zero.',
     'Storing sparse matrices in full standard 2D arrays wastes significant memory. Alternative efficient representations include:
@@ -148,7 +160,7 @@ Space complexity reduces from O(M * N) down to O(NonZeroCount).',
 ON CONFLICT (unit_id, question_number) DO NOTHING;
 
 -- Sample Numerical Problem for Unit 1
-INSERT INTO public.numericals (id, unit_id, problem_number, problem_statement, given, required, formula, solution_steps, final_answer, hinglish_explanation, is_published)
+INSERT INTO public.numericals (id, unit_id, problem_number, problem, given_data, required_result, formula, solution_steps, final_answer, hinglish_explanation, is_published)
 VALUES (
     'n0000000-0000-0000-0000-000000000001',
     'u0000000-0000-0000-0000-000000000001',
@@ -186,7 +198,7 @@ Address = 2000 + 4 * (82) = 2000 + 328 = 2328.',
 ON CONFLICT (unit_id, problem_number) DO NOTHING;
 
 -- Sample MCQs for Unit 1
-INSERT INTO public.mcqs (id, unit_id, question_number, question_text, options, correct_option, explanation, is_published)
+INSERT INTO public.mcqs (id, unit_id, question_number, question, options, correct_option, explanation, is_published)
 VALUES
 (
     'm0000000-0000-0000-0000-000000000001',

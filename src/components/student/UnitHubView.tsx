@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Unit, Subject, TheoryQuestion, Numerical, MCQ, ViewTab } from '../../types';
 import { RatingDisplay } from '../common/RatingDisplay';
+import { AcademicContentRenderer } from '../common/AcademicContentRenderer';
 
 interface UnitHubViewProps {
   unit: Unit;
@@ -201,7 +202,7 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
 
                       {/* Question Text */}
                       <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
-                        {q.question_text}
+                        {q.question || q.question_text}
                       </h2>
                     </div>
 
@@ -227,7 +228,12 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                       <span className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider mr-1">
                         Topics Covered:
                       </span>
-                      {q.topics_covered.split(',').map((topic, i) => (
+                      {(Array.isArray(q.topics_covered)
+                        ? q.topics_covered
+                        : typeof q.topics_covered === 'string'
+                        ? (q.topics_covered as string).split(',')
+                        : []
+                      ).map((topic: string, i: number) => (
                         <span
                           key={i}
                           className="px-2.5 py-0.5 rounded-lg bg-stone-100 text-slate-700 font-medium"
@@ -246,13 +252,13 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                         <span className="block text-[11px] uppercase tracking-wider font-bold text-syllabo-900 mb-1">
                           Introduction
                         </span>
-                        <p>{q.answer_intro}</p>
+                        <AcademicContentRenderer content={q.answer_intro} />
                       </div>
                     )}
 
                     {/* Main Body */}
-                    <div className="whitespace-pre-line text-slate-800 font-normal leading-relaxed pl-1">
-                      {q.answer_body}
+                    <div className="text-slate-800 font-normal leading-relaxed pl-1">
+                      <AcademicContentRenderer content={q.answer_body} />
                     </div>
 
                     {/* Diagram or Visual representation */}
@@ -262,6 +268,9 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                           src={q.diagram_url}
                           alt={q.diagram_caption || 'Concept Diagram'}
                           className="max-h-72 mx-auto rounded-xl object-contain"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><rect width="100%" height="100%" fill="%23f1f5f9"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-size="11">Diagram Unavailable</text></svg>';
+                          }}
                         />
                         {q.diagram_caption && (
                           <p className="text-xs text-slate-500 mt-2 font-medium">
@@ -277,7 +286,7 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                         <span className="block text-[11px] uppercase tracking-wider font-bold text-syllabo-900 mb-1">
                           Conclusion & Exam Tip
                         </span>
-                        <p>{q.answer_conclusion}</p>
+                        <AcademicContentRenderer content={q.answer_conclusion} />
                       </div>
                     )}
                   </div>
@@ -369,31 +378,34 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                       Problem {num.problem_number}
                     </span>
                     <h2 className="text-lg font-bold text-slate-900 leading-snug">
-                      {num.problem_statement}
+                      <AcademicContentRenderer content={num.problem || num.problem_statement} />
                     </h2>
                   </div>
 
                   {/* Given & Required */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                    {num.given && (
+                    {(num.given_data || num.given) && (
                       <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200">
                         <span className="block font-bold text-slate-500 uppercase tracking-wider mb-1">
                           Given Parameters
                         </span>
-                        <p className="whitespace-pre-line text-slate-700 leading-relaxed font-mono">
-                          {num.given}
-                        </p>
+                        <AcademicContentRenderer
+                          content={num.given_data || num.given}
+                          isMono={true}
+                          className="text-slate-700 leading-relaxed"
+                        />
                       </div>
                     )}
 
-                    {num.required && (
+                    {(num.required_result || num.required) && (
                       <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200">
                         <span className="block font-bold text-slate-500 uppercase tracking-wider mb-1">
                           Required To Find
                         </span>
-                        <p className="text-slate-700 leading-relaxed font-medium">
-                          {num.required}
-                        </p>
+                        <AcademicContentRenderer
+                          content={num.required_result || num.required}
+                          className="text-slate-700 leading-relaxed font-medium"
+                        />
                       </div>
                     )}
                   </div>
@@ -404,9 +416,11 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                       <span className="block font-bold text-syllabo-900 uppercase tracking-wider mb-1">
                         Formula Applied
                       </span>
-                      <pre className="font-mono text-sm text-slate-800 whitespace-pre-wrap">
-                        {num.formula}
-                      </pre>
+                      <AcademicContentRenderer
+                        content={num.formula}
+                        isMono={true}
+                        className="text-sm text-slate-800"
+                      />
                     </div>
                   )}
 
@@ -415,8 +429,11 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                     <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                       Step-by-Step Worked Solution
                     </span>
-                    <div className="p-5 rounded-2xl bg-stone-50/70 border border-stone-200 text-sm whitespace-pre-line font-mono text-slate-800 leading-relaxed">
-                      {num.solution_steps}
+                    <div className="p-5 rounded-2xl bg-stone-50/70 border border-stone-200 text-sm text-slate-800 leading-relaxed">
+                      <AcademicContentRenderer
+                        content={num.solution_steps}
+                        className="text-slate-800 leading-relaxed"
+                      />
                     </div>
                   </div>
 
@@ -426,9 +443,9 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                       <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
                         Final Answer
                       </span>
-                      <span className="text-sm font-black text-emerald-950 font-mono">
-                        {num.final_answer}
-                      </span>
+                      <div className="text-sm font-black text-emerald-950 font-mono">
+                        <AcademicContentRenderer content={num.final_answer} isMono={true} />
+                      </div>
                     </div>
                   )}
 
@@ -527,7 +544,7 @@ export const UnitHubView: React.FC<UnitHubViewProps> = ({
                         {mcq.question_number}
                       </span>
                       <h2 className="text-base font-bold text-slate-900">
-                        {mcq.question_text}
+                        {mcq.question || mcq.question_text}
                       </h2>
                     </div>
 

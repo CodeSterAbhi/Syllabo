@@ -16,9 +16,13 @@ import {
   Link,
   Unlink,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  Edit3,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { AcademicRichEditor } from '../common/AcademicRichEditor';
 import {
   Course,
   Subject,
@@ -74,6 +78,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
   const [newUnitNumericals, setNewUnitNumericals] = useState(true);
 
   // Form states: Theory Question
+  const [editingTheoryQuestionId, setEditingTheoryQuestionId] = useState<string | null>(null);
   const [qNum, setQNum] = useState<number>(1);
   const [qTopics, setQTopics] = useState<string>('');
   const [qText, setQText] = useState<string>('');
@@ -85,6 +90,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
   const [qHinglish, setQHinglish] = useState<string>('');
 
   // Form states: Numerical
+  const [editingNumericalId, setEditingNumericalId] = useState<string | null>(null);
   const [numProblemNumber, setNumProblemNumber] = useState<number>(1);
   const [numProblemStatement, setNumProblemStatement] = useState<string>('');
   const [numGiven, setNumGiven] = useState<string>('');
@@ -191,7 +197,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
     setAllFaculty(fList);
     setAllAssignments(aList);
     if (fList.length > 0 && !assignFacultyId) {
-      setAssignFacultyId(fList[0].id);
+      setAssignFacultyId(fList[0].user_id);
     }
     if (subjects.length > 0 && !assignSubjectId) {
       setAssignSubjectId(subjects[0].id);
@@ -313,10 +319,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
     e.preventDefault();
     if (!selectedUnitId || !qText || !qBody) return;
 
+    const topicsArray = qTopics
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+
     const res = await api.saveTheoryQuestion({
+      id: editingTheoryQuestionId || undefined,
       unit_id: selectedUnitId,
       question_number: Number(qNum),
-      topics_covered: qTopics.trim(),
+      topics_covered: topicsArray,
+      question: qText.trim(),
       question_text: qText.trim(),
       answer_intro: qIntro.trim(),
       answer_body: qBody.trim(),
@@ -328,7 +341,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
     });
 
     if (res.success) {
-      setStatusMsg({ type: 'success', text: `Theory Question ${qNum} saved successfully!` });
+      setStatusMsg({
+        type: 'success',
+        text: editingTheoryQuestionId
+          ? `Theory Question ${qNum} updated successfully!`
+          : `Theory Question ${qNum} saved successfully!`
+      });
+      setEditingTheoryQuestionId(null);
       setQText('');
       setQIntro('');
       setQBody('');
@@ -342,10 +361,54 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
     }
   };
 
+  const handleEditTheoryQuestion = (q: TheoryQuestion) => {
+    setEditingTheoryQuestionId(q.id);
+    setQNum(q.question_number);
+    setQTopics(Array.isArray(q.topics_covered) ? q.topics_covered.join(', ') : q.topics_covered || '');
+    setQText(q.question || q.question_text || '');
+    setQIntro(q.answer_intro || '');
+    setQBody(q.answer_body || '');
+    setQConclusion(q.answer_conclusion || '');
+    setQDiagramUrl(q.diagram_url || '');
+    setQDiagramCaption(q.diagram_caption || '');
+    setQHinglish(q.hinglish_explanation || '');
+    window.scrollTo({ top: 400, behavior: 'smooth' });
+  };
+
+  const handleCancelEditTheory = () => {
+    setEditingTheoryQuestionId(null);
+    setQText('');
+    setQIntro('');
+    setQBody('');
+    setQConclusion('');
+    setQDiagramUrl('');
+    setQDiagramCaption('');
+    setQHinglish('');
+  };
+
+  const handleToggleTheoryPublish = async (q: TheoryQuestion) => {
+    const res = await api.saveTheoryQuestion({
+      id: q.id,
+      unit_id: q.unit_id,
+      question_number: q.question_number,
+      is_published: !q.is_published,
+    });
+    if (res.success) {
+      setStatusMsg({
+        type: 'success',
+        text: `Theory Question ${q.question_number} ${!q.is_published ? 'published' : 'unpublished'}.`
+      });
+      loadUnitQuestions(selectedUnitId);
+    }
+  };
+
   const handleDeleteTheoryQuestion = async (questionId: string) => {
     if (!confirm('Delete this theory question?')) return;
     const res = await api.deleteTheoryQuestion(questionId);
     if (res.success) {
+      if (editingTheoryQuestionId === questionId) {
+        handleCancelEditTheory();
+      }
       setStatusMsg({ type: 'success', text: 'Theory question removed.' });
       loadUnitQuestions(selectedUnitId);
     } else {
@@ -358,10 +421,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
     if (!selectedUnitId || !numProblemStatement || !numSteps) return;
 
     const res = await api.saveNumerical({
+      id: editingNumericalId || undefined,
       unit_id: selectedUnitId,
       problem_number: Number(numProblemNumber),
+      problem: numProblemStatement.trim(),
       problem_statement: numProblemStatement.trim(),
+      given_data: numGiven.trim(),
       given: numGiven.trim(),
+      required_result: numRequired.trim(),
       required: numRequired.trim(),
       formula: numFormula.trim(),
       solution_steps: numSteps.trim(),
@@ -371,7 +438,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
     });
 
     if (res.success) {
-      setStatusMsg({ type: 'success', text: `Numerical Problem ${numProblemNumber} saved!` });
+      setStatusMsg({
+        type: 'success',
+        text: editingNumericalId
+          ? `Numerical Problem ${numProblemNumber} updated successfully!`
+          : `Numerical Problem ${numProblemNumber} saved!`
+      });
+      setEditingNumericalId(null);
       setNumProblemStatement('');
       setNumGiven('');
       setNumRequired('');
@@ -382,6 +455,46 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
       loadUnitQuestions(selectedUnitId);
     } else {
       setStatusMsg({ type: 'error', text: res.error || 'Failed to save numerical.' });
+    }
+  };
+
+  const handleEditNumerical = (num: Numerical) => {
+    setEditingNumericalId(num.id);
+    setNumProblemNumber(num.problem_number);
+    setNumProblemStatement(num.problem || num.problem_statement || '');
+    setNumGiven(num.given_data || num.given || '');
+    setNumRequired(num.required_result || num.required || '');
+    setNumFormula(num.formula || '');
+    setNumSteps(num.solution_steps || '');
+    setNumFinalAnswer(num.final_answer || '');
+    setNumHinglish(num.hinglish_explanation || '');
+    window.scrollTo({ top: 400, behavior: 'smooth' });
+  };
+
+  const handleCancelEditNumerical = () => {
+    setEditingNumericalId(null);
+    setNumProblemStatement('');
+    setNumGiven('');
+    setNumRequired('');
+    setNumFormula('');
+    setNumSteps('');
+    setNumFinalAnswer('');
+    setNumHinglish('');
+  };
+
+  const handleToggleNumericalPublish = async (num: Numerical) => {
+    const res = await api.saveNumerical({
+      id: num.id,
+      unit_id: num.unit_id,
+      problem_number: num.problem_number,
+      is_published: !num.is_published,
+    });
+    if (res.success) {
+      setStatusMsg({
+        type: 'success',
+        text: `Numerical Problem ${num.problem_number} ${!num.is_published ? 'published' : 'unpublished'}.`
+      });
+      loadUnitQuestions(selectedUnitId);
     }
   };
 
@@ -403,6 +516,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
     const res = await api.saveMCQ({
       unit_id: selectedUnitId,
       question_number: Number(mcqNumber),
+      question: mcqText.trim(),
       question_text: mcqText.trim(),
       options: {
         A: mcqOptA.trim(),
@@ -933,19 +1047,49 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
                   </p>
                 ) : (
                   unitTheoryQuestions.map(q => (
-                    <div key={q.id} className="p-4 rounded-2xl bg-white border border-stone-200 text-xs space-y-2">
+                    <div
+                      key={q.id}
+                      className={`p-4 rounded-2xl bg-white border text-xs space-y-2 transition-all ${
+                        editingTheoryQuestionId === q.id ? 'border-syllabo-900 ring-2 ring-syllabo-900/10' : 'border-stone-200'
+                      }`}
+                    >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900">Question {q.question_number}</span>
-                        <button
-                          onClick={() => handleDeleteTheoryQuestion(q.id)}
-                          className="text-rose-500 hover:text-rose-700 p-1"
-                          title="Delete Question"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900">Question {q.question_number}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            q.is_published ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-stone-100 text-slate-500'
+                          }`}>
+                            {q.is_published ? 'Published' : 'Draft'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleTheoryPublish(q)}
+                            className="p-1 rounded-lg hover:bg-stone-100 text-slate-600 transition-colors"
+                            title={q.is_published ? 'Unpublish question' : 'Publish question'}
+                          >
+                            {q.is_published ? <Eye className="w-3.5 h-3.5 text-emerald-600" /> : <EyeOff className="w-3.5 h-3.5 text-slate-400" />}
+                          </button>
+                          <button
+                            onClick={() => handleEditTheoryQuestion(q)}
+                            className="p-1 rounded-lg hover:bg-stone-100 text-blue-600 transition-colors"
+                            title="Edit question in rich editor"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTheoryQuestion(q.id)}
+                            className="p-1 rounded-lg hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition-colors"
+                            title="Delete Question"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <p className="font-semibold text-slate-800 line-clamp-2">{q.question_text}</p>
-                      <p className="text-[11px] text-slate-500 line-clamp-1">Topics: {q.topics_covered}</p>
+                      <p className="font-semibold text-slate-800 line-clamp-2">{q.question || q.question_text}</p>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">
+                        Topics: {Array.isArray(q.topics_covered) ? q.topics_covered.join(', ') : q.topics_covered}
+                      </p>
                     </div>
                   ))
                 )}
@@ -953,11 +1097,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
 
               {/* Right: Authoring Form */}
               <div className="lg:col-span-7 p-6 rounded-3xl bg-white border border-stone-200 shadow-sm space-y-4">
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-                  Author Theory Question
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                    {editingTheoryQuestionId ? `Edit Theory Question #${qNum}` : 'Author Theory Question'}
+                  </h3>
+                  {editingTheoryQuestionId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditTheory}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline"
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
 
-                <form onSubmit={handleSaveTheoryQuestion} className="space-y-3 text-xs">
+                <form onSubmit={handleSaveTheoryQuestion} className="space-y-4 text-xs">
                   <div className="grid grid-cols-4 gap-2">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-700 mb-1">Q# (1–5)</label>
@@ -985,7 +1140,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Question Text</label>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Question Prompt</label>
                     <input
                       type="text"
                       placeholder="University examination question prompt..."
@@ -996,43 +1151,43 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Introduction (Optional)</label>
-                    <textarea
-                      placeholder="Introductory context/definition..."
-                      rows={2}
-                      value={qIntro}
-                      onChange={(e) => setQIntro(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200"
-                    />
-                  </div>
+                  {/* Introduction (Rich Editor) */}
+                  <AcademicRichEditor
+                    value={qIntro}
+                    onChange={setQIntro}
+                    label="Introduction (Optional)"
+                    helperText="Tiptap Rich-Text: Headings, math, tables & inline images supported"
+                    placeholder="Introductory context or definitions..."
+                    minHeight="80px"
+                  />
 
+                  {/* Answer Body (Rich Editor) */}
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Answer Body (8-Mark University Standard)</label>
-                    <textarea
-                      placeholder="Structured answer points..."
-                      rows={5}
-                      required
+                    <AcademicRichEditor
                       value={qBody}
-                      onChange={(e) => setQBody(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200 font-mono text-[11px]"
+                      onChange={setQBody}
+                      label="Answer Body (8-Mark University Standard)"
+                      helperText="Required: Format with headings, tables, equations ($...$), and images"
+                      placeholder="Structured answer body, derivations, algorithms, tables..."
+                      minHeight="180px"
                     />
+                    {!qBody && (
+                      <p className="text-[10px] text-amber-600 mt-1">Answer body is required to save.</p>
+                    )}
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Conclusion & Exam Tip (Optional)</label>
-                    <textarea
-                      placeholder="Concluding remark or key takeaway..."
-                      rows={2}
-                      value={qConclusion}
-                      onChange={(e) => setQConclusion(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200"
-                    />
-                  </div>
+                  {/* Conclusion (Rich Editor) */}
+                  <AcademicRichEditor
+                    value={qConclusion}
+                    onChange={setQConclusion}
+                    label="Conclusion & Exam Tip (Optional)"
+                    placeholder="Concluding takeaway or key points for university examiners..."
+                    minHeight="80px"
+                  />
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Diagram URL (Optional)</label>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Diagram URL (Optional External Diagram)</label>
                       <input
                         type="text"
                         placeholder="https://..."
@@ -1066,9 +1221,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
 
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-2xl bg-syllabo-900 text-white font-bold text-xs hover:bg-syllabo-800 shadow-sm"
+                    disabled={!qBody.trim()}
+                    className="w-full py-3 rounded-2xl bg-syllabo-900 text-white font-bold text-xs hover:bg-syllabo-800 disabled:opacity-50 shadow-sm transition-all"
                   >
-                    Save Theory Question
+                    {editingTheoryQuestionId ? 'Update Theory Question' : 'Save Theory Question'}
                   </button>
                 </form>
               </div>
@@ -1089,18 +1245,46 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
                   </p>
                 ) : (
                   unitNumericals.map(num => (
-                    <div key={num.id} className="p-4 rounded-2xl bg-white border border-stone-200 text-xs space-y-2">
+                    <div
+                      key={num.id}
+                      className={`p-4 rounded-2xl bg-white border text-xs space-y-2 transition-all ${
+                        editingNumericalId === num.id ? 'border-syllabo-900 ring-2 ring-syllabo-900/10' : 'border-stone-200'
+                      }`}
+                    >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-900">Problem {num.problem_number}</span>
-                        <button
-                          onClick={() => handleDeleteNumerical(num.id)}
-                          className="text-rose-500 hover:text-rose-700 p-1"
-                          title="Delete Numerical"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900">Problem {num.problem_number}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            num.is_published ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-stone-100 text-slate-500'
+                          }`}>
+                            {num.is_published ? 'Published' : 'Draft'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleToggleNumericalPublish(num)}
+                            className="p-1 rounded-lg hover:bg-stone-100 text-slate-600 transition-colors"
+                            title={num.is_published ? 'Unpublish numerical' : 'Publish numerical'}
+                          >
+                            {num.is_published ? <Eye className="w-3.5 h-3.5 text-emerald-600" /> : <EyeOff className="w-3.5 h-3.5 text-slate-400" />}
+                          </button>
+                          <button
+                            onClick={() => handleEditNumerical(num)}
+                            className="p-1 rounded-lg hover:bg-stone-100 text-blue-600 transition-colors"
+                            title="Edit numerical problem"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteNumerical(num.id)}
+                            className="p-1 rounded-lg hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition-colors"
+                            title="Delete Numerical"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <p className="font-semibold text-slate-800 line-clamp-2">{num.problem_statement}</p>
+                      <p className="font-semibold text-slate-800 line-clamp-2">{num.problem || num.problem_statement}</p>
                       {num.final_answer && (
                         <p className="text-[11px] font-mono text-emerald-800">Answer: {num.final_answer}</p>
                       )}
@@ -1111,98 +1295,110 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
 
               {/* Form */}
               <div className="lg:col-span-7 p-6 rounded-3xl bg-white border border-stone-200 shadow-sm space-y-4">
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-                  Author Worked Numerical Problem
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                    {editingNumericalId ? `Edit Numerical Problem #${numProblemNumber}` : 'Author Worked Numerical Problem'}
+                  </h3>
+                  {editingNumericalId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditNumerical}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 underline"
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
 
-                <form onSubmit={handleSaveNumerical} className="space-y-3 text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className="w-20">
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Problem #</label>
-                      <input
-                        type="number"
-                        min="1"
-                        required
-                        value={numProblemNumber}
-                        onChange={(e) => setNumProblemNumber(Number(e.target.value))}
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-center font-bold"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Final Answer</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Address of A[15, 8] = 2328"
-                        value={numFinalAnswer}
-                        onChange={(e) => setNumFinalAnswer(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Problem Statement</label>
-                    <textarea
-                      placeholder="Numerical problem statement..."
-                      rows={2}
-                      required
-                      value={numProblemStatement}
-                      onChange={(e) => setNumProblemStatement(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Given Parameters</label>
-                      <textarea
-                        placeholder="LB1=10, Base=2000..."
-                        rows={2}
-                        value={numGiven}
-                        onChange={(e) => setNumGiven(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Required To Find</label>
-                      <textarea
-                        placeholder="Memory address..."
-                        rows={2}
-                        value={numRequired}
-                        onChange={(e) => setNumRequired(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Formula</label>
+                <form onSubmit={handleSaveNumerical} className="space-y-4 text-xs">
+                  <div className="w-24">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Problem #</label>
                     <input
-                      type="text"
-                      placeholder="Address = Base + W * [ ... ]"
-                      value={numFormula}
-                      onChange={(e) => setNumFormula(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200 font-mono"
+                      type="number"
+                      min="1"
+                      required
+                      value={numProblemNumber}
+                      onChange={(e) => setNumProblemNumber(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-center font-bold"
                     />
                   </div>
 
+                  {/* Problem Statement (Rich Editor) */}
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Step-by-Step Solution</label>
-                    <textarea
-                      placeholder="Step 1: Compute columns...&#10;Step 2: Calculate offset..."
-                      rows={4}
-                      required
-                      value={numSteps}
-                      onChange={(e) => setNumSteps(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200 font-mono"
+                    <AcademicRichEditor
+                      value={numProblemStatement}
+                      onChange={setNumProblemStatement}
+                      label="Problem Statement"
+                      helperText="Required: Equations ($...$) and symbols supported"
+                      placeholder="Numerical problem statement..."
+                      minHeight="90px"
+                    />
+                    {!numProblemStatement && (
+                      <p className="text-[10px] text-amber-600 mt-1">Problem statement is required to save.</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Given Parameters (Rich Editor) */}
+                    <AcademicRichEditor
+                      value={numGiven}
+                      onChange={setNumGiven}
+                      label="Given Parameters"
+                      placeholder="LB1=10, Base=2000..."
+                      minHeight="80px"
+                    />
+
+                    {/* Required To Find (Rich Editor) */}
+                    <AcademicRichEditor
+                      value={numRequired}
+                      onChange={setNumRequired}
+                      label="Required To Find"
+                      placeholder="Memory address of A[15, 8]..."
+                      minHeight="80px"
                     />
                   </div>
+
+                  {/* Formula (Rich Editor) */}
+                  <AcademicRichEditor
+                    value={numFormula}
+                    onChange={setNumFormula}
+                    label="Formula Applied"
+                    helperText="Insert KaTeX math formula (e.g. $Address = Base + W \\times [...] $)"
+                    placeholder="Address = Base + W * [ ... ]"
+                    minHeight="80px"
+                  />
+
+                  {/* Step-by-Step Solution (Rich Editor) */}
+                  <div>
+                    <AcademicRichEditor
+                      value={numSteps}
+                      onChange={setNumSteps}
+                      label="Step-by-Step Solution"
+                      helperText="Required: Comprehensive worked steps, equations, and tables"
+                      placeholder="Step 1: Compute columns...&#10;Step 2: Calculate offset..."
+                      minHeight="180px"
+                    />
+                    {!numSteps && (
+                      <p className="text-[10px] text-amber-600 mt-1">Step-by-step solution is required to save.</p>
+                    )}
+                  </div>
+
+                  {/* Final Answer (Rich Editor) */}
+                  <AcademicRichEditor
+                    value={numFinalAnswer}
+                    onChange={setNumFinalAnswer}
+                    label="Final Answer"
+                    placeholder="e.g. Address of A[15, 8] = 2328"
+                    minHeight="60px"
+                    compact={true}
+                  />
 
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-2xl bg-syllabo-900 text-white font-bold text-xs hover:bg-syllabo-800 shadow-sm"
+                    disabled={!numProblemStatement.trim() || !numSteps.trim()}
+                    className="w-full py-3 rounded-2xl bg-syllabo-900 text-white font-bold text-xs hover:bg-syllabo-800 disabled:opacity-50 shadow-sm transition-all"
                   >
-                    Save Numerical Problem
+                    {editingNumericalId ? 'Update Numerical Problem' : 'Save Numerical Problem'}
                   </button>
                 </form>
               </div>
@@ -1239,7 +1435,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
                           </button>
                         </div>
                       </div>
-                      <p className="font-medium text-slate-800 line-clamp-2">{m.question_text}</p>
+                      <p className="font-medium text-slate-800 line-clamp-2">{m.question || m.question_text}</p>
                     </div>
                   ))
                 )}
@@ -1447,7 +1643,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
 
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {allFaculty.map(f => (
-                  <div key={f.id} className="p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs">
+                  <div key={f.user_id} className="p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs">
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-slate-900">{f.display_name}</span>
@@ -1461,7 +1657,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
                     </div>
 
                     <button
-                      onClick={() => handleToggleFacultyActive(f.id, f.is_active)}
+                      onClick={() => handleToggleFacultyActive(f.user_id, f.is_active)}
                       className={`px-3 py-1 rounded-full text-[11px] font-bold transition-colors ${
                         f.is_active
                           ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
@@ -1498,7 +1694,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBackToStudent }) => 
                   className="w-full px-3 py-2 rounded-xl border border-stone-200"
                 >
                   {allFaculty.map(f => (
-                    <option key={f.id} value={f.id}>
+                    <option key={f.user_id} value={f.user_id}>
                       {f.faculty_code} — {f.display_name}
                     </option>
                   ))}

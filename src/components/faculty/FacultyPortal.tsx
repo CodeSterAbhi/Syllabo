@@ -60,9 +60,9 @@ export const FacultyPortal: React.FC<FacultyPortalProps> = ({
       const profile = await api.getFacultyProfile();
       if (profile) {
         setFacultyProfile(profile);
-        const assigns = await api.getFacultyAssignments(profile.id);
+        const assigns = await api.getFacultyAssignments(profile.user_id);
         setAssignments(assigns);
-        const evals = await api.getFacultyEvaluations(profile.id);
+        const evals = await api.getFacultyEvaluations(profile.user_id);
         setEvaluations(evals);
 
         if (assigns.length > 0 && !selectedSubjectId) {
@@ -173,7 +173,7 @@ export const FacultyPortal: React.FC<FacultyPortalProps> = ({
 
     const result = await api.submitEvaluation(
       selectedQuestionId,
-      facultyProfile.id,
+      facultyProfile.user_id,
       score,
       feedback
     );
@@ -186,7 +186,7 @@ export const FacultyPortal: React.FC<FacultyPortalProps> = ({
         text: 'Evaluation score recorded successfully! Aggregate rating updated.',
       });
       // Refresh evaluations map
-      const updatedEvals = await api.getFacultyEvaluations(facultyProfile.id);
+      const updatedEvals = await api.getFacultyEvaluations(facultyProfile.user_id);
       setEvaluations(updatedEvals);
     } else {
       setSubmitMessage({
@@ -438,7 +438,7 @@ export const FacultyPortal: React.FC<FacultyPortalProps> = ({
                         >
                           <div className="truncate">
                             <span className="font-bold mr-1.5">Q{q.question_number}.</span>
-                            <span className="truncate">{q.question_text}</span>
+                            <span className="truncate">{q.question || q.question_text}</span>
                           </div>
 
                           <div className="shrink-0">
@@ -481,7 +481,7 @@ export const FacultyPortal: React.FC<FacultyPortalProps> = ({
                         )}
                       </div>
                       <h2 className="text-lg font-bold text-slate-900">
-                        {activeQuestion.question_text}
+                        {activeQuestion.question || activeQuestion.question_text}
                       </h2>
                     </div>
 
